@@ -268,23 +268,25 @@ Ahora usa correctamente `claimantKp.publicKey()`.
 
 ---
 
-## 📊 Cuentas de Stellar Testnet configuradas
+## 📋 Cuentas de Stellar Testnet
 
-Estas cuentas están configuradas en `.env` y se usan para los tests de integración REAL:
+Las cuentas de Stellar Testnet se configuran exclusivamente en el archivo `.env` (local, no se sube al repositorio):
 
-| Cuenta | Public Key | Secret Key | Uso |
-|--------|-----------|------------|-----|
-| Sponsor | `GC2M6KWINT6OPRVKXB5K3JRTJ5IPAEYDODAQPF6VST7VCFFBJ3SZWYFA` | `SDZMXKDEUBBAFISKMRKIWP4NLSF3XAITZE565CDR4BDAXLNMEEGE7LQZ` | Paga fees y crea Claimable Balances |
-| Sender/Claimant | `GBA7WPRVUR3Q2QMSHWU47AE47X74QKVV6WFTXW4SQUULENII2EFYED63` | `SBYML6WMAXGVNREKQXMOBRWJZIN2UESFEQNSAP2ILIAO2QMP43NMZ55G` | Reclama Claimable Balances |
+| Variable de entorno | Uso |
+|---------------------|-----|
+| `STELLAR_SPONSOR_PUBLIC_KEY` | Public key del sponsor (paga fees y crea Claimable Balances) |
+| `STELLAR_SPONSOR_SECRET_KEY` | Secret key del sponsor **(nunca subir al repo)** |
+| `STELLAR_SENDER_PUBLIC_KEY` | Public key del sender/claimant |
+| `STELLAR_SENDER_SECRET_KEY` | Secret key del sender/claimant **(nunca subir al repo)** |
+| `STELLAR_USDC_ISSUER` | Emisor del asset USDC |
+| `STELLAR_USDC_ASSET_CODE` | Código del asset USDC |
 
-**USDC Issuer:** `GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5`  
-**USDC Asset Code:** `USDC`  
 **Red:** Stellar Testnet (`https://horizon-testnet.stellar.org`)
 
 ### Requisitos para tests USDC
 
 El sponsor debe tener:
-1. ✅ Trustline USDC establecida con el issuer `GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5`
+1. ✅ Trustline USDC establecida con el issuer configurado en `STELLAR_USDC_ISSUER`
 2. ✅ Saldo USDC suficiente (≥ 5 USDC por test de Claimable Balance)
 
 Si el sponsor se queda sin USDC, el test falla con `op_underfunded`. Fondear la cuenta
@@ -300,12 +302,38 @@ con más USDC del mismo issuer para volver a ejecutar.
 | Opción 2 — Integración REAL XLM | 2/2 | ✅ Pasando | Claimable Balance creado y reclamado en Testnet |
 | Opción 2 — Integración REAL USDC | 1/1 | ✅ Pasando | Requiere sponsor con saldo USDC |
 | Opción 3 — Suite completa | 63/64 | ✅ Pasando | 1 falla posible si sponsor sin USDC |
+## 🔍 Evidencia en StellarExpert (Testnet)
 
-**Evidencia de test USDC exitoso:**
-- `balance_id: 00000000829583d50bee1b50aacd2b821f518356990ae94208b0868869447f4c57a8c6df`
-- `create_tx_hash: 0a2185d96056d58ae6c8596df3dfc45c047e4bec836e4326b52fb6a334ef79af`
-- `claim_tx_hash: 606596249a02c58f7b70de12c37abe0d7f0f97df66be25c495d55a0d1104d27f`
-- Claimant USDC final: 30.0000000 (recibió 5 USDC del Claimable Balance)
+Todos los tests de integración REAL se ejecutaron contra Stellar Testnet y son verificables en el explorador público:
+
+### Cuentas
+
+| Cuenta | Link StellarExpert | Rol |
+|--------|-------------------|-----|
+| Sponsor | https://stellar.expert/explorer/testnet/account/GC2M6KWINT6OPRVKXB5K3JRTJ5IPAEYDODAQPF6VST7VCFFBJ3SZWYFA | Paga fees y crea Claimable Balances |
+| Sender/Claimant | https://stellar.expert/explorer/testnet/account/GBA7WPRVUR3Q2QMSHWU47AE47X74QKVV6WFTXW4SQUULENII2EFYED63 | Reclama Claimable Balances |
+
+### Transacciones de evidencia (test USDC exitoso)
+
+| Transacción | Link StellarExpert | Descripción |
+|-------------|-------------------|-------------|
+| Crear Claimable Balance | https://stellar.expert/explorer/testnet/tx/0a2185d96056d58ae6c8596df3dfc45c047e4bec836e4326b52fb6a334ef79af | createClaimableBalance de 5 USDC patrocinado |
+| Reclamar Claimable Balance | https://stellar.expert/explorer/testnet/tx/606596249a02c58f7b70de12c37abe0d7f0f97df66be25c495d55a0d1104d27f | claimClaimableBalance por el claimant |
+
+### Claimable Balance creado
+
+| balanceId | Link StellarExpert | Estado |
+|-----------|-------------------|--------|
+| `00000000829583d50bee1b50aacd2b821f518356990ae94208b0868869447f4c57a8c6df` | https://stellar.expert/explorer/testnet/claimable-balance/00000000829583d50bee1b50aacd2b821f518356990ae94208b0868869447f4c57a8c6df | Reclamado ✅ |
+
+### Resultado final en cadena
+
+- Claimant USDC: 25.0000000 → 30.0000000 (+5 USDC recibidos)
+- Claimant XLM: 9999.9999700 (sin cambios — no pagó gas de red)
+- Claimable Balance: reclamado y ya no disponible en la cuenta del sponsor
+
+---
+
 - Claimant XLM final: 9999.9999700 (sin cambios, no pagó gas)
 
 ---
@@ -321,8 +349,7 @@ El sponsor no tiene trustline USDC establecida. Solución:
 ### `op_underfunded` en test USDC
 
 El sponsor no tiene suficiente saldo USDC. Solución:
-1. Enviar más USDC del mismo issuer a la public key del sponsor:
-   `GC2M6KWINT6OPRVKXB5K3JRTJ5IPAEYDODAQPF6VST7VCFFBJ3SZWYFA`
+1. Enviar más USDC del mismo issuer a la public key del sponsor configurada en `STELLAR_SPONSOR_PUBLIC_KEY`
 2. Cada Claimable Balance de 5 USDC consume 5 USDC del sponsor
 
 ### `Cuenta ... no apareció` en `beforeAll`
