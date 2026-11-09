@@ -1,14 +1,5 @@
 import { Horizon, Keypair, TransactionBuilder, Networks, Operation, Asset, BASE_FEE, xdr, Claimant } from "@stellar/stellar-sdk";
 
-/**
- * Cliente Stellar real contra Horizon Testnet usando @stellar/stellar-sdk.
- *
- * Implementa la creación de Claimable Balance patrocinado (patrón simple y correcto):
- * - El sponsor crea el Claimable Balance directamente con dos claimants
- * - No requiere "sandwich" complejo ni crear la cuenta del claimant primero
- * - El sponsor firma y paga el fee
- * - El claimant reclama después con su secret key
- */
 export class StellarHorizonClient {
   private horizon: Horizon.Server;
   private networkPassphrase: string;
@@ -24,26 +15,18 @@ export class StellarHorizonClient {
     this.usdcIssuer = usdcIssuer;
   }
 
-  /**
-   * Crea un Claimable Balance patrocinado (patrón simple y correcto).
-   *
-   * El sponsor crea el Claimable Balance con dos claimants:
-   * 1. claimantAddress (destinatario real) - con predicate abs_before
-   * 2. sponsor publicKey (claimant de reverso) - predicate unconditional
-   *
-   * El sponsor firma y paga el fee.
-   * El claimant NO necesita firmar la creación, solo el reclamo posterior.
-   */
   async crearClaimableBalanceSponsored(params: {
     senderPublicKey: string;
     claimantAddress: string;
+    claimantSecretKey: string;
     sponsorSecretKey: string;
     asset: string;
     amount: number;
     claimableUntil: Date;
-  }): Promise<{ balanceId: string; txHash: string }> {
+  }): Promise<{ balanceId: string; txHash: string; operationCount: number }> {
     const {
       claimantAddress,
+      claimantSecretKey,
       sponsorSecretKey,
       asset,
       amount,
@@ -52,7 +35,6 @@ export class StellarHorizonClient {
 
     const sponsorKp = Keypair.fromSecret(sponsorSecretKey);
 
-    // Asset
     let stellarAsset: Asset;
     if (asset.toUpperCase() === "XLM" || asset.toUpperCase() === "NATIVE") {
       stellarAsset = Asset.native();
@@ -66,26 +48,18 @@ export class StellarHorizonClient {
       stellarAsset = new Asset(assetCode, assetIssuer);
     }
 
-    // Predicate para el claimant real: abs_before(claimableUntil)
     const absBefore = BigInt(Math.floor(claimableUntil.getTime() / 1000));
     const predicate = xdr.ClaimPredicate.claimPredicateBeforeAbsoluteTime(absBefore);
 
-    // Claimant real (destinatario) con predicate de expiración
-    const claimant = new Claimant(claimantAddress, predicate);
+    const sponsorAcc = await this.horizon.loadAccount(sponsorKp.publicKey());
 
-    // Claimant de reverso (sponsor) con predicate unconditional
-    const sponsorClaimant = new Claimant(
-      Keypair.fromSecret(sponsorSecretKey).publicKey(),
-      xdr.ClaimPredicate.claimPredicateUnconditional()
-    );
+    await this.asegurarFondeoSponsor(sponsorKp.publicKey());
+    await this.asegurarCuentaClaimant(sponsorSecretKey, claimantAddress);
 
-    // Cargar cuenta del sponsor
-    const sponsorAcc = await this.horizon.loadAccount(Keypair.fromSecret(sponsorSecretKey).publicKey());
+    if (asset.toUpperCase() !== "XLM" && asset.toUpperCase() !== "NATIVE") {
+      await this.establecerTrustline(sponsorSecretKey, claimantSecretKey, stellarAsset);
+    }
 
-    // Fondear sponsor si no tiene XLM suficiente
-    await this.asegurarFondeoSponsor(Keypair.fromSecret(sponsorSecretKey).publicKey());
-
-    // Construir transacción: crear Claimable Balance con dos claimants
     const transaction = new TransactionBuilder(sponsorAcc, {
       fee: BASE_FEE,
       networkPassphrase: this.networkPassphrase,
@@ -94,29 +68,25 @@ export class StellarHorizonClient {
         Operation.createClaimableBalance({
           asset: stellarAsset,
           amount: amount.toString(),
-          claimants: [claimant, sponsorClaimant],
+          claimants: [
+            new Claimant(claimantAddress, xdr.ClaimPredicate.claimPredicateBeforeAbsoluteTime(BigInt(Math.floor(claimableUntil.getTime() / 1000)))),
+            new Claimant(sponsorKp.publicKey(), xdr.ClaimPredicate.claimPredicateUnconditional()),
+          ],
           source: sponsorKp.publicKey(),
         }),
       )
       .setTimeout(180)
       .build();
 
-    // Firmar con el sponsor
     transaction.sign(Keypair.fromSecret(sponsorSecretKey));
-
-    // Enviar
     const result = await this.horizon.submitTransaction(transaction);
 
-    // Extraer balance ID de los efectos
     let balanceId = "";
     try {
       const effects = await this.horizon.effects().forTransaction(result.hash).call();
-      const claimableEffect = effects.records.find(
-        (e: any) => e.type === "claimable_balance_created",
-      );
+      const claimableEffect = effects.records.find((e: any) => e.type === "claimable_balance_created");
       if (claimableEffect) {
-        // @ts-ignore - balance_id may not be in type
-        balanceId = claimableEffect.balance_id;
+        balanceId = (claimableEffect as any).balance_id;
       }
     } catch {
       balanceId = result.hash;
@@ -125,128 +95,104 @@ export class StellarHorizonClient {
     return {
       balanceId: balanceId || result.hash,
       txHash: result.hash,
+      operationCount: transaction.operations.length,
     };
   }
 
-  /**
-   * Asegura que el sponsor tenga XLM suficiente (Friendbot).
-   */
   private async asegurarFondeoSponsor(publicKey: string): Promise<void> {
     try {
       await this.horizon.loadAccount(publicKey);
-      return; // Ya existe
+      return;
     } catch {
-      // No existe, fondear con Friendbot
       const response = await fetch(`https://friendbot.stellar.org?addr=${publicKey}`);
-      if (!response.ok) {
-        throw new Error(`Friendbot failed: ${response.statusText}`);
-      }
-      // Esperar a que la cuenta exista
+      if (!response.ok) throw new Error(`Friendbot failed: ${response.statusText}`);
       await this.esperarCuenta(publicKey);
     }
   }
 
-  /**
-   * Reclama un Claimable Balance (claimClaimableBalance) con fee-bump del sponsor.
-   */
-  async reclamarClaimableBalance(params: {
-    balanceId: string;
-    claimantSecretKey: string;
-    sponsorSecretKey: string;
-  }): Promise<{ txHash: string }> {
-    const { balanceId, claimantSecretKey, sponsorSecretKey } = params;
+  private async asegurarCuentaClaimant(sponsorSecretKey: string, claimantAddress: string): Promise<void> {
+    try {
+      await this.horizon.loadAccount(claimantAddress);
+      return;
+    } catch {
+      const sponsorKp = Keypair.fromSecret(sponsorSecretKey);
+      const sponsorAcc = await this.horizon.loadAccount(sponsorKp.publicKey());
+      const tx = new TransactionBuilder(sponsorAcc, { fee: BASE_FEE, networkPassphrase: this.networkPassphrase })
+        .addOperation(Operation.createAccount({ destination: claimantAddress, startingBalance: "1" }))
+        .setTimeout(180)
+        .build();
+      tx.sign(Keypair.fromSecret(sponsorSecretKey));
+      await this.horizon.submitTransaction(tx);
+      await this.esperarCuenta(claimantAddress);
+    }
+  }
 
+  private async establecerTrustline(sponsorSecretKey: string, claimantSecretKey: string, asset: Asset): Promise<void> {
+    if (asset.isNative()) return;
     const claimantKp = Keypair.fromSecret(claimantSecretKey);
-    const sponsorKp = Keypair.fromSecret(sponsorSecretKey);
-
-    const transaction = new TransactionBuilder(
-      await this.horizon.loadAccount(sponsorKp.publicKey()),
-      {
-        fee: BASE_FEE,
-        networkPassphrase: Networks.TESTNET,
-      })
+    try {
+      const account = await this.horizon.loadAccount(claimantKp.publicKey());
+      const hasTrustline = account.balances.some((b: any) =>
+        b.asset_type === "credit_alphanum4" &&
+        b.asset_code === asset.getCode() &&
+        b.asset_issuer === asset.getIssuer()
+      );
+      if (hasTrustline) return;
+    } catch {
+      // No tiene cuenta, ya se creó arriba
+    }
+    const account = await this.horizon.loadAccount(claimantKp.publicKey());
+    const tx = new TransactionBuilder(account, { fee: BASE_FEE, networkPassphrase: this.networkPassphrase })
       .addOperation(
-        Operation.claimClaimableBalance({
-          balanceId,
+        Operation.changeTrust({
+          asset: new Asset("USDC", this.usdcIssuer),
           source: claimantKp.publicKey(),
         }),
       )
       .setTimeout(180)
       .build();
-
-    // Fee-bump: sponsor paga las fees
-    transaction.sign(Keypair.fromSecret(sponsorSecretKey));
-    // El claimant firma la operación de claim
-    transaction.sign(Keypair.fromSecret(claimantSecretKey));
-
-    const result = await this.horizon.submitTransaction(transaction);
-    return { txHash: result.hash };
+    tx.sign(claimantKp);
+    await this.horizon.submitTransaction(tx);
   }
 
-  /**
-   * Obtiene el estado de una transacción.
-   */
+  async reclamarClaimableBalance(params: { balanceId: string; claimantSecretKey: string; sponsorSecretKey: string }): Promise<{ txHash: string }> {
+    const { balanceId, claimantSecretKey, sponsorSecretKey } = params;
+    const claimantKp = Keypair.fromSecret(claimantSecretKey);
+    const sponsorKp = Keypair.fromSecret(sponsorSecretKey);
+    const tx = new TransactionBuilder(
+      await this.horizon.loadAccount(sponsorKp.publicKey()),
+      { fee: BASE_FEE, networkPassphrase: Networks.TESTNET }
+    )
+      .addOperation(Operation.claimClaimableBalance({ balanceId, source: claimantKp.publicKey() }))
+      .setTimeout(180)
+      .build();
+    tx.sign(Keypair.fromSecret(sponsorSecretKey));
+    tx.sign(Keypair.fromSecret(claimantSecretKey));
+    const r = await this.horizon.submitTransaction(tx);
+    return { txHash: r.hash };
+  }
+
   async obtenerEstadoTransaccion(txHash: string): Promise<{ successful: boolean }> {
-    try {
-      const tx = await this.horizon.transactions().transaction(txHash).call();
-      return { successful: tx.successful };
-    } catch {
-      return { successful: false };
-    }
+    try { const tx = await this.horizon.transactions().transaction(txHash).call(); return { successful: tx.successful }; }
+    catch { return { successful: false }; }
   }
 
-  /**
-   * Verifica si existe un Claimable Balance y obtiene su último tx.
-   */
-  async obtenerBalance(balanceId: string): Promise<{
-    exists: boolean;
-    balance?: any;
-  }> {
-    try {
-      const balance = await this.horizon
-        .claimableBalances()
-        .claimableBalance(balanceId)
-        .call();
-      return {
-        exists: true,
-        balance,
-      };
-    } catch {
-      return { exists: false };
-    }
+  async obtenerBalance(balanceId: string): Promise<{ exists: boolean; balance?: any }> {
+    try { const b = await this.horizon.claimableBalances().claimableBalance(balanceId).call(); return { exists: true, balance: b }; }
+    catch { return { exists: false }; }
   }
 
-  /**
-   * Fondea una cuenta en Testnet via Friendbot.
-   */
   async fondearConFriendbot(publicKey: string): Promise<void> {
-    const response = await fetch(
-      `https://friendbot.stellar.org?addr=${publicKey}`,
-    );
-    if (!response.ok) {
-      throw new Error(`Friendbot failed: ${response.statusText}`);
-    }
-    await this.esperarCuenta(publicKey);
+    const r = await fetch(`https://friendbot.stellar.org?addr=${publicKey}`);
+    if (!r.ok) throw new Error(`Friendbot failed: ${r.statusText}`);
+    await this.esperarCuenta(r.url);
   }
 
-  /**
-   * Espera a que una cuenta exista en Horizon.
-   */
-  async esperarCuenta(publicKey: string, maxAttempts = 30): Promise<void> {
-    for (let i = 0; i < maxAttempts; i++) {
-      try {
-        await this.horizon.loadAccount(publicKey);
-        return;
-      } catch {
-        await new Promise((r) => setTimeout(r, 1000));
-      }
-    }
-    throw new Error(`Cuenta ${publicKey} no apareció en Horizon tras ${maxAttempts}s`);
+  async esperarCuenta(publicKey: string, max = 30): Promise<void> {
+    for (let i = 0; i < max; i++) { try { await this.horizon.loadAccount(publicKey); return; } catch { await new Promise(r => setTimeout(r, 1000)); } }
+    throw new Error(`Cuenta ${publicKey} no apareció`);
   }
 
-  /**
-   * Genera un keypair aleatorio para tests.
-   */
   static async generarKeypair(): Promise<{ secretKey: string; publicKey: string }> {
     const { Keypair } = await import("@stellar/stellar-sdk");
     const kp = Keypair.random();

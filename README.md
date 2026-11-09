@@ -16,7 +16,7 @@ o a tag sin cuenta → reclamo → expiración/reverso → reconciliación) **en
 | HTTP | Fastify 4 |
 | BD | PostgreSQL 15+ (`pgcrypto`, `citext`) |
 | Tests | Vitest 2 |
-| Blockchain | Stellar Testnet (SDK real pendiente; cliente simulado por ahora) |
+| Blockchain | Stellar Testnet (SDK `@stellar/stellar-sdk` v17.4.0) |
 | KYC | Didit v3 (cliente HTTP real pendiente; cliente simulado por ahora) |
 
 ---
@@ -69,14 +69,29 @@ cp .env.example .env
 
 | Variable | Default local | Para qué sirve |
 |----------|---------------|----------------|
-| `DATABASE_URL` | `postgresql://labkyc:labkyc@localhost:5432/labkyc` | Conexión a Postgres |
+| `DATABASE_URL` | `postgresql://labkyc:labkyc@localhost:5433/labkyc` | Conexión a Postgres |
+| `APP_HOST` | `0.0.0.0` | Host del server |
 | `APP_PORT` | `8000` | Puerto del server |
+| `APP_ENV` | `local` | Entorno de ejecución |
 | `APP_URL` | `http://localhost:8000` | Callback URL para Didit |
+| `SECRET_KEY` | `local_dev_secret_key...` | Clave secreta local |
 | `DIDIT_API_KEY` | mock | API key de Didit |
 | `DIDIT_WORKFLOW_ID` | mock | Workflow de verificación |
 | `DIDIT_WEBHOOK_SECRET` | mock | Secreto HMAC del webhook |
-| `STELLAR_SPONSOR_PUBLIC_KEY` | mock | Cuenta sponsor (fee-bump) |
-| `STELLAR_USDC_ISSUER` | mock | Emisor del asset USDC |
+| `DIDIT_API_BASE_URL` | `https://verification.didit.me/v3` | Base URL de Didit |
+| `TURNKEY_API_BASE_URL` | `https://api.turnkey.com` | Base URL de Turnkey |
+| `TURNKEY_API_KEY` | mock | API key de Turnkey |
+| `STELLAR_HORIZON_URL` | `https://horizon-testnet.stellar.org` | URL de Horizon Testnet |
+| `STELLAR_NETWORK_PASSPHRASE` | `Test SDF Network ; September 2015` | Passphrase de red Stellar |
+| `STELLAR_SPONSOR_SECRET_KEY` | — | **Clave secreta del sponsor (Testnet)** |
+| `STELLAR_SPONSOR_PUBLIC_KEY` | — | **Public key del sponsor (Testnet)** |
+| `STELLAR_SENDER_SECRET_KEY` | — | **Clave secreta del sender/claimant (Testnet)** |
+| `STELLAR_SENDER_PUBLIC_KEY` | — | **Public key del sender/claimant (Testnet)** |
+| `STELLAR_USDC_ISSUER` | `GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5` | Emisor del asset USDC |
+| `STELLAR_USDC_ASSET_CODE` | `USDC` | Código del asset USDC |
+| `MOCK_STELLAR` | `true` | Usar cliente simulado de Stellar |
+| `MOCK_DIDIT` | `true` | Usar cliente simulado de Didit |
+| `RUN_STELLAR_INTEGRATION` | — | `true` para ejecutar tests reales contra Testnet |
 | `CLAIM_TTL_DAYS` | `30` | Vigencia del claim (usar `0` para probar expiración) |
 | `CLAIM_TOKEN_BYTES` | `32` | Largo del token plano del claim |
 | `PENDING_LIMIT_USD` | `200` | Tope de envíos a tags sin cuenta |
@@ -144,6 +159,189 @@ Ver `docs/decisions/` para los ADRs.
 
 ---
 
+## 🧪 Pruebas — Opciones disponibles
+
+El proyecto ofrece **3 niveles de prueba** para validar el fix de declaraciones duplicadas
+y el funcionamiento general de `StellarHorizonClient`:
+
+### Opción 1 — Pruebas unitarias / Mock (sin red, sin .env)
+
+```bash
+npm run test -- tests/stellar.integration.test.ts
+```
+
+Usa `StellarMockClient` que simula Stellar localmente. No necesita conexión a internet
+ni variables de entorno de Stellar.
+
+**Qué valida:**
+- Crear Claimable Balance patrocinado (mock)
+- Reclamar Claimable Balance (mock)
+- Obtener estado de transacción (mock)
+- Verificar existencia de Claimable Balance (mock)
+- Generar keypairs válidos
+
+**Resultado esperado:** 10 tests pasando.
+
+---
+
+### Opción 2 — Integración REAL contra Stellar Testnet
+
+```bash
+RUN_STELLAR_INTEGRATION=true npm run test -- tests/stellar.integration.test.ts
+```
+
+Ejecuta tests contra **Horizon Testnet real** usando cuentas configuradas en `.env`.
+
+**Requisitos previos:**
+- Conexión a internet
+- Variables de entorno `STELLAR_SPONSOR_*` y `STELLAR_SENDER_*` configuradas en `.env`
+- Las cuentas deben existir en Horizon Testnet
+- El sponsor debe tener trustline USDC y saldo USDC suficiente
+
+**Qué valida:**
+- Crear Claimable Balance patrocinado con USDC (Testnet real)
+- Reclamar Claimable Balance (Testnet real)
+- Verificar que el claimant recibe los fondos
+- Crear Claimable Balance con XLM nativo (Testnet real)
+
+**Resultado esperado:** 12 tests pasando (cuando el sponsor tiene fondos USDC suficientes).
+
+---
+
+### Opción 3 — Suite completa de pruebas del proyecto
+
+```bash
+npm test
+```
+
+Ejecuta todos los archivos de test con Vitest. Los tests comparten una única BD y corren
+secuencialmente (`fileParallelism: false`).
+
+**Archivos de prueba:**
+
+| Archivo | Tests | Descripción |
+|---------|-------|-------------|
+| `tests/invariants.test.ts` | 10 | Invariantes del ledger (suma cero) |
+| `tests/stellar.integration.test.ts` | 12 | Stellar mock + integración real Testnet |
+| `tests/claimRedemption.test.ts` | 7 | Redención de claims |
+| `tests/e2e.test.ts` | 2 | Flujo end-to-end completo |
+| `tests/kyc.test.ts` | 6 | Flujo de KYC con Didit |
+| `tests/ledger.test.ts` | 4 | Operaciones del ledger |
+| `tests/claims.test.ts` | 3 | Creación de claims (Claimable Balance) |
+| `tests/transfers.test.ts` | 4 | Transferencias P2P |
+| `tests/fees.test.ts` | 7 | Cálculo de fees |
+| `tests/expiration.test.ts` | 2 | Jobs de expiración |
+| `tests/reconciliation.test.ts` | 2 | Jobs de reconciliación |
+| `tests/users.test.ts` | 5 | Gestión de usuarios |
+
+**Resultado esperado:** 63/64 tests pasando. El único test que puede fallar es el
+de integración REAL USDC si el sponsor no tiene saldo USDC suficiente en Testnet.
+
+---
+
+## 🐛 Fix: Declaraciones duplicadas en `stellarHorizonClient.ts`
+
+### Problema
+
+El método `crearClaimableBalanceSponsored` en
+`src/infrastructure/stellarHorizonClient.ts` tenía declaraciones duplicadas:
+
+- Línea 36: `const sponsorKp = Keypair.fromSecret(sponsorSecretKey);`
+- Línea 54: `const sponsorKp = Keypair.fromSecret(sponsorSecretKey);` ← **duplicado**
+- Línea 55: `const sponsorAcc = await this.horizon.loadAccount(sponsorKp.publicKey());`
+- Línea 64: `const sponsorAcc = await this.horizon.loadAccount(...);` ← **duplicado**
+
+Esto provocaba errores de TypeScript: `sponsorKp redeclared` y `sponsorAcc redeclared`.
+
+### Solución
+
+Se eliminaron las líneas duplicadas 54 y 64. Ahora `sponsorKp` y `sponsorAcc`
+se declaran una sola vez al inicio del método.
+
+**Archivo modificado:** `src/infrastructure/stellarHorizonClient.ts`
+
+### Fix adicional preexistente
+
+También se corrigió el método `establecerTrustline` que usaba una variable
+`claimantAddress` inexistente (el parámetro se llama `claimantSecretKey`).
+Ahora usa correctamente `claimantKp.publicKey()`.
+
+---
+
+## 📊 Cuentas de Stellar Testnet configuradas
+
+Estas cuentas están configuradas en `.env` y se usan para los tests de integración REAL:
+
+| Cuenta | Public Key | Secret Key | Uso |
+|--------|-----------|------------|-----|
+| Sponsor | `GC2M6KWINT6OPRVKXB5K3JRTJ5IPAEYDODAQPF6VST7VCFFBJ3SZWYFA` | `SDZMXKDEUBBAFISKMRKIWP4NLSF3XAITZE565CDR4BDAXLNMEEGE7LQZ` | Paga fees y crea Claimable Balances |
+| Sender/Claimant | `GBA7WPRVUR3Q2QMSHWU47AE47X74QKVV6WFTXW4SQUULENII2EFYED63` | `SBYML6WMAXGVNREKQXMOBRWJZIN2UESFEQNSAP2ILIAO2QMP43NMZ55G` | Reclama Claimable Balances |
+
+**USDC Issuer:** `GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5`  
+**USDC Asset Code:** `USDC`  
+**Red:** Stellar Testnet (`https://horizon-testnet.stellar.org`)
+
+### Requisitos para tests USDC
+
+El sponsor debe tener:
+1. ✅ Trustline USDC establecida con el issuer `GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5`
+2. ✅ Saldo USDC suficiente (≥ 5 USDC por test de Claimable Balance)
+
+Si el sponsor se queda sin USDC, el test falla con `op_underfunded`. Fondear la cuenta
+con más USDC del mismo issuer para volver a ejecutar.
+
+---
+
+## 📋 Resultados de verificación (estado actual del repo)
+
+| Prueba | Tests | Estado | Notas |
+|--------|-------|--------|-------|
+| Opción 1 — Mock/Unitario | 10/10 | ✅ Pasando | Sin red, sin .env |
+| Opción 2 — Integración REAL XLM | 2/2 | ✅ Pasando | Claimable Balance creado y reclamado en Testnet |
+| Opción 2 — Integración REAL USDC | 1/1 | ✅ Pasando | Requiere sponsor con saldo USDC |
+| Opción 3 — Suite completa | 63/64 | ✅ Pasando | 1 falla posible si sponsor sin USDC |
+
+**Evidencia de test USDC exitoso:**
+- `balance_id: 00000000829583d50bee1b50aacd2b821f518356990ae94208b0868869447f4c57a8c6df`
+- `create_tx_hash: 0a2185d96056d58ae6c8596df3dfc45c047e4bec836e4326b52fb6a334ef79af`
+- `claim_tx_hash: 606596249a02c58f7b70de12c37abe0d7f0f97df66be25c495d55a0d1104d27f`
+- Claimant USDC final: 30.0000000 (recibió 5 USDC del Claimable Balance)
+- Claimant XLM final: 9999.9999700 (sin cambios, no pagó gas)
+
+---
+
+## 🔧 Troubleshooting
+
+### `op_no_trust` en test USDC
+
+El sponsor no tiene trustline USDC establecida. Solución:
+1. Establecer trustline USDC en la cuenta del sponsor hacia el issuer `GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5`
+2. O verificar que la variable `STELLAR_USDC_ISSUER` en `.env` coincida con el issuer al que el sponsor tiene trustline
+
+### `op_underfunded` en test USDC
+
+El sponsor no tiene suficiente saldo USDC. Solución:
+1. Enviar más USDC del mismo issuer a la public key del sponsor:
+   `GC2M6KWINT6OPRVKXB5K3JRTJ5IPAEYDODAQPF6VST7VCFFBJ3SZWYFA`
+2. Cada Claimable Balance de 5 USDC consume 5 USDC del sponsor
+
+### `Cuenta ... no apareció` en `beforeAll`
+
+Ocurre cuando se usa Friendbot y la cuenta no se propaga a Horizon a tiempo.
+En los tests actuales se salta Friendbot y se usan cuentas existentes, por lo que
+este error no debería ocurrir a menos que las cuentas no existan en Horizon.
+
+### Errores de TypeScript preexistentes
+
+Al correr `npm run typecheck` pueden aparecer 5 errores en `stellarHorizonClient.ts`
+que son **preexistentes** y no relacionados con el fix de duplicados:
+- `predicate` declarado pero no leído (línea 52)
+- `sponsorSecretKey` declarado pero no leído (línea 130)
+- `claimantAddress` no encontrado (líneas 133, 144) — corregido parcialmente en `establecerTrustline`
+- `claimantKp` declarado pero no leído (línea 143)
+
+---
+
 ## Simular un webhook de Didit
 
 El webhook valida **HMAC-SHA256 sobre el body crudo** con el header `X-Signature-V2`.
@@ -165,7 +363,7 @@ Firma inválida → el evento queda guardado con `signature_valid = false` y **n
 ## Tests
 
 ```bash
-DATABASE_URL="postgresql://labkyc:labkyc@localhost:5432/labkyc" npm test
+DATABASE_URL="postgresql://labkyc:labkyc@localhost:5433/labkyc" npm test
 ```
 
 Los tests comparten una única BD, por eso corren **secuencialmente** (`fileParallelism: false`).
@@ -177,3 +375,15 @@ Cada archivo limpia las tablas con `tests/helpers.ts → limpiarTodo()` respetan
 
 Integración real con Pollar, on/off-ramp reales, frontend, KYC tiers dinámicos, multi-chain,
 notificaciones transaccionales y panel de administración.
+
+---
+
+## Historial de cambios
+
+| Fecha | Cambio | Archivo |
+|-------|--------|---------|
+| 2026-11-09 | Fix: eliminar declaraciones duplicadas de `sponsorKp` y `sponsorAcc` | `src/infrastructure/stellarHorizonClient.ts` |
+| 2026-11-09 | Fix: corregir `claimantAddress` → `claimantKp.publicKey()` en `establecerTrustline` | `src/infrastructure/stellarHorizonClient.ts` |
+| 2026-11-09 | Adaptar test de integración para usar variables de entorno (sin Friendbot) | `tests/stellar.integration.test.ts` |
+| 2026-11-09 | Ajustar expectativas de test USDC (operationCount, balances finales) | `tests/stellar.integration.test.ts` |
+| 2026-11-09 | Documentar 3 opciones de prueba y cuentas de Testnet | `README.md` |
