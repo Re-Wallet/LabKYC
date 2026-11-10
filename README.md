@@ -334,7 +334,7 @@ con más USDC del mismo issuer para volver a ejecutar.
 | Opción 1 — Mock/Unitario | 10/10 | ✅ Pasando | Sin red, sin .env |
 | Opción 2 — Integración REAL XLM | 2/2 | ✅ Pasando | Claimable Balance creado y reclamado en Testnet |
 | Opción 2 — Integración REAL USDC | 1/1 | ✅ Pasando | Requiere sponsor con saldo USDC |
-| Opción 3 — Suite completa | 63/64 | ✅ Pasando | 1 falla posible si sponsor sin USDC |
+| Opción 3 — Suite completa | 64/64 | ✅ Pasando | Todas las pruebas verdes |
 ## 🔍 Evidencia en StellarExpert (Testnet)
 
 Todos los tests de integración REAL se ejecutaron contra Stellar Testnet y son verificables en el explorador público:
@@ -346,28 +346,24 @@ Todos los tests de integración REAL se ejecutaron contra Stellar Testnet y son 
 | Sponsor | https://stellar.expert/explorer/testnet/account/GC2M6KWINT6OPRVKXB5K3JRTJ5IPAEYDODAQPF6VST7VCFFBJ3SZWYFA | Paga fees y crea Claimable Balances |
 | Sender/Claimant | https://stellar.expert/explorer/testnet/account/GBA7WPRVUR3Q2QMSHWU47AE47X74QKVV6WFTXW4SQUULENII2EFYED63 | Reclama Claimable Balances |
 
-### Transacciones de evidencia (test USDC exitoso)
+### Transacciones de evidencia (test USDC exitoso — suite completa 64/64)
 
 | Transacción | Link StellarExpert | Descripción |
 |-------------|-------------------|-------------|
-| Crear Claimable Balance | https://stellar.expert/explorer/testnet/tx/0a2185d96056d58ae6c8596df3dfc45c047e4bec836e4326b52fb6a334ef79af | createClaimableBalance de 5 USDC patrocinado |
-| Reclamar Claimable Balance | https://stellar.expert/explorer/testnet/tx/606596249a02c58f7b70de12c37abe0d7f0f97df66be25c495d55a0d1104d27f | claimClaimableBalance por el claimant |
+| Crear Claimable Balance | https://stellar.expert/explorer/testnet/tx/3deced75d2ccd87b19993a5c15697105ad5f16238bfb1d85832324af172edb35 | createClaimableBalance de 5 USDC patrocinado |
+| Reclamar Claimable Balance | https://stellar.expert/explorer/testnet/tx/d11fa40284b9c96fb5803fedb642e37ef63e63723d6a235c36f1825110678516 | claimClaimableBalance por el claimant |
 
 ### Claimable Balance creado
 
 | balanceId | Link StellarExpert | Estado |
 |-----------|-------------------|--------|
-| `00000000829583d50bee1b50aacd2b821f518356990ae94208b0868869447f4c57a8c6df` | https://stellar.expert/explorer/testnet/claimable-balance/00000000829583d50bee1b50aacd2b821f518356990ae94208b0868869447f4c57a8c6df | Reclamado ✅ |
+| `00000000ab4d5ee2d6f76c0d7a36fcae6aa7b7011c01b2d76508bad59a6265956244c032` | https://stellar.expert/explorer/testnet/claimable-balance/00000000ab4d5ee2d6f76c0d7a36fcae6aa7b7011c01b2d76508bad59a6265956244c032 | Reclamado ✅ |
 
 ### Resultado final en cadena
 
-- Claimant USDC: 25.0000000 → 30.0000000 (+5 USDC recibidos)
+- Claimant USDC: 35.0000000 → 40.0000000 (+5 USDC recibidos)
 - Claimant XLM: 9999.9999700 (sin cambios — no pagó gas de red)
 - Claimable Balance: reclamado y ya no disponible en la cuenta del sponsor
-
----
-
-- Claimant XLM final: 9999.9999700 (sin cambios, no pagó gas)
 
 ---
 
