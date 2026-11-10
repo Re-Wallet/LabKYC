@@ -75,10 +75,10 @@ cp .env.example .env
 | `APP_ENV` | `local` | Entorno de ejecución |
 | `APP_URL` | `http://localhost:8000` | Callback URL para Didit |
 | `SECRET_KEY` | `local_dev_secret_key...` | Clave secreta local |
-| `DIDIT_API_KEY` | mock | API key de Didit |
-| `DIDIT_WORKFLOW_ID` | mock | Workflow de verificación |
-| `DIDIT_WEBHOOK_SECRET` | mock | Secreto HMAC del webhook |
-| `DIDIT_API_BASE_URL` | `https://verification.didit.me/v3` | Base URL de Didit |
+| `DIDIT_API_KEY` | mock | API key de Didit (requerido si `MOCK_DIDIT !== "true"`) |
+| `DIDIT_WORKFLOW_ID` | mock | Workflow de verificación de Didit |
+| `DIDIT_WEBHOOK_SECRET` | mock | Secreto HMAC del webhook de Didit |
+| `DIDIT_API_BASE_URL` | `https://verification.didit.me/v3` | Base URL de Didit API |
 | `TURNKEY_API_BASE_URL` | `https://api.turnkey.com` | Base URL de Turnkey |
 | `TURNKEY_API_KEY` | mock | API key de Turnkey |
 | `STELLAR_HORIZON_URL` | `https://horizon-testnet.stellar.org` | URL de Horizon Testnet |
@@ -90,7 +90,7 @@ cp .env.example .env
 | `STELLAR_USDC_ISSUER` | `GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5` | Emisor del asset USDC |
 | `STELLAR_USDC_ASSET_CODE` | `USDC` | Código del asset USDC |
 | `MOCK_STELLAR` | `true` | Usar cliente simulado de Stellar |
-| `MOCK_DIDIT` | `true` | Usar cliente simulado de Didit |
+| `MOCK_DIDIT` | `true` | `"true"` = usa `DiditMockClient` (tests/local). Cualquier otro valor = usa `DiditHTTPClient` contra la API real de Didit |
 | `RUN_STELLAR_INTEGRATION` | — | `true` para ejecutar tests reales contra Testnet |
 | `CLAIM_TTL_DAYS` | `30` | Vigencia del claim (usar `0` para probar expiración) |
 | `CLAIM_TOKEN_BYTES` | `32` | Largo del token plano del claim |
@@ -125,7 +125,7 @@ npm run build      # tsc -> dist/
 |--------|------|-------------|
 | `POST` | `/users` | Registra usuario (tag único, compliance profile 1:1) |
 | `POST` | `/kyc/start` | Crea sesión de verificación en Didit |
-| `POST` | `/webhooks/didit` | Webhook de Didit (HMAC-SHA256 `X-Signature-V2`) |
+| `POST` | `/webhooks/didit` | Webhook de Didit (HMAC-SHA256 `X-Signature-V2` + verificación de `X-Timestamp` ≤ 300s) |
 | `POST` | `/wallets` | Crea wallet no-custodial |
 | `GET` | `/wallets/me?userId=` | Wallet del usuario |
 | `POST` | `/ledger/grupo` | Grupo de asientos balanceado (uso interno/debug) |
@@ -154,6 +154,39 @@ npm run build      # tsc -> dist/
    **no** se ejecuta lógica de negocio.
 7. **Token plano del claim una sola vez** — en DB sólo `claims.claim_token_hash` (SHA-256).
 8. **Estados de transfer** — `pending → pending_claim → claimed_onchain → completed` (o `failed`/`reversed`).
+
+---
+
+## 🔐 Configuración de Didit / KYC
+
+El proyecto soporta dos modos de operación para Didit, controlados por la variable `MOCK_DIDIT`:
+
+### Modo Mock (`MOCK_DIDIT=true`)
+Usa `DiditMockClient`. Ideal para desarrollo local y tests sin credenciales de Didit.
+
+```bash
+MOCK_DIDIT=true
+```
+
+### Modo Real (`MOCK_DIDIT` distinto de `"true"`)
+Usa `DiditHTTPClient` contra la API real de Didit (`https://verification.didit.me/v3`).
+
+Variables requeridas en `.env`:
+
+| Variable | Descripción |
+|----------|-------------|
+| `DIDIT_API_KEY` | API key de Didit (header `x-api-key`) |
+| `DIDIT_WORKFLOW_ID` | UUID del workflow de verificación en Didit Console |
+| `DIDIT_WEBHOOK_SECRET` | Shared secret para verificar firmas HMAC-SHA256 del webhook |
+| `DIDIT_API_BASE_URL` | Base URL de Didit (default: `https://verification.didit.me/v3`) |
+
+### Flujo KYC
+
+1. **Iniciar sesión** — `POST /kyc/start` crea una sesión en Didit y retorna la `url` a la que redirigir al usuario.
+2. **Usuario verifica** — El usuario completa el flujo de identidad en Didit (hosted session).
+3. **Webhook** — Didit envía `POST /webhooks/didit` con `X-Signature-V2` y `X-Timestamp`. La firma se valida sobre el body crudo; el timestamp se rechaza si tiene más de 300 segundos.
+4. **Estado aprobado** — Al recibir `status.updated` con `status: "Approved"`, se actualiza `users.kyc_status = 'approved'`, se extraen los datos OCR (`full_name`, `document_number`, etc.) y se activan las wallets pendientes del usuario.
+5. **Liberación de claims** — Cuando KYC se aprueba, se disparan los claims pendientes asociados al usuario.
 
 Ver `docs/decisions/` para los ADRs.
 

@@ -22,6 +22,7 @@ export interface IniciarKYCOutput {
 export interface ProcesarWebhookInput {
   rawBody: string;
   signatureHeader?: string | null;
+  timestampHeader?: string | null;
 }
 
 export class KYCUseCases {
@@ -61,7 +62,15 @@ export class KYCUseCases {
   }
 
   async procesarWebhook(input: ProcesarWebhookInput): Promise<{ procesado: boolean; eventId?: string }> {
-    // 1. Validar firma PRIMERO (nunca confiar en el body sin verificar)
+    // 1. Validar timestamp (rechazar entregas con X-Timestamp > 300 segundos antiguos)
+    if (input.timestampHeader) {
+      const ts = parseInt(input.timestampHeader, 10);
+      if (isNaN(ts)) return { procesado: false, eventId: undefined };
+      const ahora = Math.floor(Date.now() / 1000);
+      if (ahora - ts > 300) return { procesado: false, eventId: undefined }; // > 5 min antiguo
+    }
+
+    // 2. Validar firma PRIMERO (nunca confiar en el body sin verificar)
     const firmaOk = this.verificarFirma(input.rawBody, input.signatureHeader ?? null);
 
     // 2. Parsear payload
