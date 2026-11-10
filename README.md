@@ -10,101 +10,55 @@ o a tag sin cuenta → reclamo → expiración/reverso → reconciliación) **en
 
 ## 📊 Diagrama de Arquitectura General
 
-```mermaid
-flowchart TD
-    subgraph Cliente
-        UI[Cliente Web / Mobile]
-    end
-
-    subgraph API Layer [interfaces/ - Fastify]
-        Routes[Rutas Fastify]
-        Zod[Validación Zod]
-        DTO[DTOs]
-    end
-
-    subgraph Application Layer [application/ - Casos de uso]
-        KYCUC[KYCUseCases]
-        ClaimUC[ClaimUseCases]
-        TransferUC[TransferUseCases]
-        LedgerUC[LedgerUseCases]
-        UserUC[UserUseCases]
-        FeeUC[FeeUseCases]
-        ExpirationUC[ExpirationJob]
-        ReconciliationUC[ReconciliationJob]
-    end
-
-    subgraph Domain Layer [domain/ - Puertos y entidades]
-        KYCPort[Puerto DiditClient]
-        ClaimPort[Puerto ClaimReleaser]
-        UserPort[Puerto UserRepository]
-        WalletPort[Puerto WalletRepository]
-        LedgerPort[Puerto LedgerRepository]
-        KYCEntity[KYCVerification]
-        ClaimEntity[Claim]
-        TransferEntity[Transfer]
-    end
-
-    subgraph Infrastructure Layer [infrastructure/ - Adaptadores]
-        DiditHTTP[DiditHTTPClient - API real]
-        DiditMock[DiditMockClient - Simulado]
-        PostgresKYC[PostgresKYCVerificationRepository]
-        PostgresUser[PostgresUserRepository]
-        PostgresWallet[PostgresWalletRepository]
-        PostgresLedger[PostgresLedgerService]
-        StellarClient[StellarHorizonClient - Stellar Testnet]
-        WebhookRepo[PostgresWebhookEventRepository]
-    end
-
-    subgraph External Services
-        Didit[Didit API - https://verification.didit.me/v3]
-        Horizon[Stellar Horizon Testnet]
-        Friendbot[Friendbot - Fondos Testnet]
-        PG[(PostgreSQL 15+)]
-    end
-
-    UI --> Routes
-    Routes --> Zod
-    Zod --> DTO
-    DTO --> KYCUC
-    DTO --> ClaimUC
-    DTO --> TransferUC
-    DTO --> LedgerUC
-    DTO --> UserUC
-    DTO --> FeeUC
-    DTO --> ExpirationUC
-    DTO --> ReconciliationUC
-
-    KYCUC --> KYCPort
-    ClaimUC --> ClaimPort
-    TransferUC --> UserPort
-    TransferUC --> WalletPort
-    TransferUC --> LedgerPort
-    LedgerUC --> LedgerPort
-    UserUC --> UserPort
-
-    KYCPort --> DiditHTTP
-    KYCPort --> DiditMock
-    ClaimPort --> PostgresKYC
-    UserPort --> PostgresUser
-    WalletPort --> PostgresWallet
-    LedgerPort --> PostgresLedger
-
-    DiditHTTP --> Didit
-    StellarClient --> Horizon
-    DiditHTTP --> Friendbot
-    PostgresKYC --> PG
-    PostgresUser --> PG
-    PostgresWallet --> PG
-    PostgresLedger --> PG
-    WebhookRepo --> PG
-
-    style UI fill:#e1f5e1,stroke:#2e7d32
-    style API Layer fill:#fff3e0,stroke:#f57c00
-    style Application Layer fill:#e3f2fd,stroke:#1565c0
-    style Domain Layer fill:#f3e5f5,stroke:#6a1b9a
-    style Infrastructure Layer fill:#e0e0e0,stroke:#424242
-    style External Services fill:#ffebee,stroke:#c62828
 ```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                           CLIENTE                                            │
+│                    ┌──────────────┐                                          │
+│                    │  UI Web/Móvil│                                          │
+│                    └──────┬───────┘                                          │
+│                           │                                                  │
+│                           ▼                                                  │
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                     API LAYER (interfaces/ - Fastify)                        │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                          │
+│  │   Rutas     │──▶│   Zod       │──▶│   DTOs    │                          │
+│  │   Fastify   │   Validación    │                           │              │
+│  └─────────────┘  └─────────────┘  └─────────────┘                          │
+└──────────────────────────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                  APPLICATION LAYER (application/ - Casos de uso)            │
+│  KYCUseCases  ClaimUseCases  TransferUseCases  LedgerUseCases               │
+│  UserUseCases  FeeUseCases  ExpirationJob  ReconciliationJob                │
+└──────────────────────────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                   DOMAIN LAYER (domain/ - Puertos y entidades)              │
+│  Puerto DiditClient  Puerto ClaimReleaser  Puerto UserRepository            │
+│  Puerto WalletRepo   Puerto LedgerRepo      KYCVerification                 │
+│  Claim               Transfer                                                    │
+└──────────────────────────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│              INFRASTRUCTURE LAYER (infrastructure/ - Adaptadores)           │
+│  DiditHTTPClient  DiditMockClient  PostgresKYCVerificationRepository        │
+│  PostgresUserRepo  PostgresWalletRepo  PostgresLedgerService                │
+│  StellarHorizonClient  PostgresWebhookEventRepository                        │
+└──────────────────────────────────────────────────────────────────────────────┘
+                           │
+                           ▼
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                     EXTERNAL SERVICES                                        │
+│  Didit API (verification.didit.me/v3)  Stellar Horizon Testnet              │
+│  Friendbot  PostgreSQL 15+                                               │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+Regla de dependencia: `interfaces → application → domain`, y `infrastructure → domain`.  
+El dominio NUNCA importa: `pg`, `fastify`, `stellar-sdk`, `didit-sdk`.
 
 ---
 
@@ -141,116 +95,135 @@ El dominio NUNCA importa: pg, fastify, stellar-sdk, didit-sdk
 
 ### 1. Flujo KYC / Didit
 
-```mermaid
-sequenceDiagram
-    participant U as Usuario
-    participant A as API Fastify
-    participant C as KYCUseCases
-    participant R as PostgresKYCVerificationRepository
-    participant D as DiditHTTPClient
-    participant Didit as Didit API
-    participant W as Webhook /webhooks/didit
-
-    U->>A: POST /kyc/start {userId, callbackUrl}
-    A->>C: iniciarKYC({userId, callbackUrl})
-    C->>R: obtenerSesionActivaPorUsuario(userId)
-    alt Sesión activa existe
-        R-->>C: Sesión existente
-        C-->>A: {verificationId, url}
-        A-->>U: 200 {url}
-    else No hay sesión activa
-        C->>D: crearSesion(workflowId, vendorData, callback)
-        D->>Didit: POST /v3/session/ {x-api-key, body}
-        Didit-->>D: {session_id, url}
-        D-->>C: {sessionId, url}
-        C->>R: crear({userId, diditSessionId, workflowId, sessionUrl})
-        C->>R: actualizarKycStatus(userId, 'in_progress')
-        C-->>A: {verificationId, url}
-        A-->>U: 200 {url}
-    end
-
-    U->>Didit: Abre url (verificación de identidad)
-    Didit->>W: POST /webhooks/didit {X-Signature-V2, X-Timestamp, body}
-    W->>W: verificarFirma(rawBody, signatureHeader)
-    alt Firma válida
-        W->>C: procesarWebhook({rawBody, signatureHeader, timestampHeader})
-        C->>R: obtenerPorDiditSessionId(sessionId)
-        alt status = Approved
-            C->>R: actualizarEstado(Approved, decision)
-            C->>R: actualizarDatosKYC(userId, datosOCR)
-            C->>R: actualizarKycStatus(userId, 'approved')
-            C->>R: activarWalletsPendientes(userId)
-            C->>R: dispararClaimsPendientes(userId)
-        else status = Declined
-            C->>R: actualizarKycStatus(userId, 'declined')
-        else status = In Review
-            C->>R: actualizarKycStatus(userId, 'in_review')
-        end
-        W-->>Didit: 200 ok
-    else Firma inválida
-        W-->>Didit: 401 (evento guardado, no procesado)
-    end
+```
+Usuario ──▶ POST /kyc/start ──▶ KYCUseCases ──▶ PostgresKYCRepo
+                              │                  │
+                              │ (sesión activa?) │
+                              │                  │
+                              ▼                  ▼
+                         DiditHTTPClient   Sesión existente
+                              │                  │
+                              ▼                  ▼
+                         POST /v3/session/   ┌──────────────┐
+                         (x-api-key, body)   │ {verificationId, url} │
+                              │                  │
+                              ▼                  ▼
+                         Didit API responde   Usuario recibe URL
+                         {session_id, url}         │
+                              │                  ▼
+                              ▼           Usuario abre URL en Didit
+                         KYCUseCases guarda     │
+                         en BD                  ▼
+                              │           Didit envía webhook
+                              ▼                  POST /webhooks/didit
+                         actualizarKycStatus      │
+                         (approved/declined)      ▼
+                              │           verificarFirma()
+                              ▼                  │
+                         actualizarDatosKYC   ├─▶ Firma válida ──▶ procesarWebhook()
+                         (OCR)                  │                      │
+                              │                  │                      ▼
+                              ▼                  │              obtenerPorDiditSessionId()
+                         activarWalletsPendientes  │                      │
+                         dispararClaimsPendientes  │                  status=Approved?
+                              │                  │                  │
+                              ▼                  │              ┌───┴───┴───┐
+                         Responder 200 {url}  │                  │         │
+                              │                  │       Declined  In Review
+                              ▼                  │                  │         │
+                         Usuario recibe URL  │                  ▼         ▼
+                              │                  │           kyc_status='declined'
+                              ▼                  │           kyc_status='in_review'
+                         Fin                     │                  │
+                                                 │                  ▼
+                                                 │           actualizarKycStatus()
+                                                 │                  │
+                                                 └──────────────────┘
 ```
 
 ### 2. Flujo Claimable Balance (Stellar)
 
-```mermaid
-sequenceDiagram
-    participant U as Usuario
-    participant A as API Fastify
-    participant C as ClaimUseCases
-    participant S as StellarHorizonClient
-    participant H as Horizon Testnet
-    participant F as Friendbot
-
-    U->>A: POST /transfers/claim {senderId, recipientTag, amount, asset}
-    A->>C: crearClaim({senderId, recipientTag, amount, asset, idempotencyKey})
-    C->>C: Validar sender KYC = approved
-    C->>C: Validar destinatario NO existe como usuario
-    C->>R: crearGrupoBalanceado (ledger suma cero)
-    C->>R: crearTransfer(status=pending_claim, recipient_user_id=NULL)
-    C->>R: crearClaim(token_hash, amount, asset, expires_at)
-    C-->>A: {status: pending_claim, claimToken, transferId, claimId}
-    A-->>U: 200 {claimToken}
-
-    U->>U: Comparte claimToken con destinatario
-    Destinatario->>A: POST /claims/:token/redeem {userId}
-    A->>C: reclamarClaim({token, userId})
-    C->>C: Validar KYC del usuario = approved
-    C->>S: crearClaimableBalanceSponsored({sponsorSecretKey, asset, amount, claimableUntil})
-    S->>H: loadAccount(sponsorPublicKey)
-    S->>F: friendbot (si cuenta no existe)
-    S->>S: establecerTrustline (si USDC y claimant no tiene)
-    S->>H: submitTransaction(createClaimableBalance)
-    H-->>S: {balanceId, txHash}
-    S-->>C: {balanceId, txHash}
-    C->>R: actualizarClaim(claimed_onchain, balanceId, txHash)
-    C->>R: actualizarTransfer(claimed_onchain)
-    C-->>A: {next: completed}
-    A-->>Destinatario: 200 {status: completed}
+```
+Usuario ──▶ POST /transfers/claim ──▶ ClaimUseCases ──▶ Validar KYC = approved
+                              │                  │
+                              ▼                  ▼
+                         Validar destinatario   Crear ledger (suma cero)
+                         NO existe como user   Crear transfer (pending_claim)
+                              │                  │
+                              ▼                  ▼
+                         Generar claimToken   Crear claim (token_hash, amount, asset)
+                              │                  │
+                              ▼                  ▼
+                         Responder 200 {claimToken}   Destinatario POST /claims/:token/redeem
+                              │                  │
+                              ▼                  ▼
+                         Fin              ClaimUseCases.validar KYC = approved
+                                         │
+                                         ▼
+                              StellarHorizonClient.crearClaimableBalanceSponsored()
+                              │
+                              ▼
+                         Horizon.loadAccount(sponsorPublicKey)
+                              │
+                              ▼
+                         ¿Cuenta existe? ──No──▶ Friendbot fondea
+                              │Sí
+                              ▼
+                         ¿USDC? ──No──▶ XLM nativo
+                              │Sí
+                              ▼
+                         ¿Claimant tiene trustline? ──No──▶ crearTrustline()
+                              │Sí
+                              ▼
+                         Horizon.submitTransaction(createClaimableBalance)
+                              │
+                              ▼
+                         {balanceId, txHash}
+                              │
+                              ▼
+                         actualizarClaim(claimed_onchain)
+                         actualizarTransfer(claimed_onchain)
+                              │
+                              ▼
+                         Responder 200 {status: completed}
 ```
 
 ### 3. Flujo de Transferencia P2P
 
-```mermaid
-flowchart TD
-    Start[POST /transfers] --> ValidarKYC[Validar KYC sender = approved]
-    ValidarKYC --> ExisteDest[¿Destinatario existe?]
-    
-    ExisteDest -->|Sí| TransferExistente[Transferencia directa a usuario]
-    ExisteDest -->|No| CrearClaim[Crear Claimable Balance]
-    
-    TransferExistente --> Ledger[Grupo asientos suma cero]
-    Ledger --> TransferOK[Transferencia completada]
-    
-    CrearClaim --> ClaimLedger[Ledger grupo suma cero]
-    ClaimLedger --> ClaimPending[Transfer pendiente_claim]
-    ClaimPending --> Token[Generar claimToken]
-    Token --> ClaimOK[Responder claimToken]
-    
-    style TransferOK fill:#e1f5e1,stroke:#2e7d32
-    style ClaimOK fill:#e1f5e1,stroke:#2e7d32
 ```
+POST /transfers
+      │
+      ▼
+Validar KYC sender = approved
+      │
+      ▼
+┌─────┴─────┐
+│           │
+Sí          No
+│           │
+▼           ▼
+Destinatario   Destinatario NO existe como usuario
+existe         │
+│              ▼
+▼           Crear Claimable Balance
+Transferencia │
+directa       ▼
+a usuario     Ledger grupo suma cero
+│              │
+▼              ▼
+Grupo asientos  Transfer pending_claim
+suma cero       │
+│              ▼
+▼           Generar claimToken
+Fin           │
+              ▼
+             Responder claimToken
+              │
+              ▼
+             Fin
+```
+
+**Nota:** Los diagramas anteriores usan formato ASCII para garantizar que se rendericen correctamente en cualquier visor de Markdown, incluido GitHub.
 
 ---
 
