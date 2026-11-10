@@ -287,10 +287,10 @@ CREATE INDEX fee_charges_transfer_idx ON fee_charges(transfer_id);
 CREATE OR REPLACE FUNCTION check_ledger_invariants() RETURNS TABLE(transaction_group_id UUID, asset TEXT) AS $$
 BEGIN
     RETURN QUERY
-        SELECT transaction_group_id, asset
-        FROM ledger_entries
-        GROUP BY transaction_group_id, asset
-        HAVING ABS(SUM(CASE WHEN direction = 'credit' THEN amount WHEN direction = 'debit' THEN -amount END)) > 0.00000001;
+        SELECT le.transaction_group_id, le.asset
+        FROM ledger_entries le
+        GROUP BY le.transaction_group_id, le.asset
+        HAVING ABS(SUM(CASE WHEN le.direction = 'credit' THEN le.amount WHEN le.direction = 'debit' THEN -le.amount END)) > 0.00000001;
 END;
 $$ LANGUAGE plpgsql;
 
