@@ -244,6 +244,7 @@ CREATE TABLE fee_configs (
     fiat_currency TEXT,
     crypto_asset TEXT,
     provider     TEXT,
+    fee_payer    fee_payer_enum NOT NULL DEFAULT 'user',
     fee_type     fee_type_enum NOT NULL,
     percentage   NUMERIC(20,8),
     flat_amount  NUMERIC(20,8),
@@ -286,10 +287,10 @@ DECLARE
 BEGIN
     FOR rec IN
         SELECT transaction_group_id, asset,
-               SUM(CASE WHEN direction = 'credit' THEN amount WHEN direction = 'debit' THEN -amount END) AS net
+               SUM(CASE WHEN direction = 'credit' THEN amount WHEN direction = 'debit' THEN -amount END) AS net_amount
         FROM ledger_entries
         GROUP BY transaction_group_id, asset
-        HAVING ABS(net) > 0.00000001
+        HAVING ABS(SUM(CASE WHEN direction = 'credit' THEN amount WHEN direction = 'debit' THEN -amount END)) > 0.00000001
     LOOP
         imbalance_count := imbalance_count + 1;
     END LOOP;
