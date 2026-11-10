@@ -235,26 +235,6 @@ CREATE INDEX ledger_entries_account_idx ON ledger_entries(user_id, wallet_id);
 CREATE INDEX ledger_entries_asset_idx ON ledger_entries(asset);
 
 -- ============================================================
--- FEE_CHARGES (comisiones cobradas)
--- ============================================================
-CREATE TABLE fee_charges (
-    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    fee_config_id UUID REFERENCES fee_configs(id) ON DELETE SET NULL,
-    transfer_id UUID REFERENCES transfers(id) ON DELETE SET NULL,
-    ledger_entry_id UUID REFERENCES ledger_entries(id) ON DELETE SET NULL,
-    provider    TEXT NOT NULL,
-    leg_type    TEXT NOT NULL,
-    gross_amount NUMERIC(20,8) NOT NULL,
-    fee_amount   NUMERIC(20,8) NOT NULL,
-    fee_asset    TEXT NOT NULL,
-    fee_payer    TEXT NOT NULL,
-    status       TEXT NOT NULL,
-    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE INDEX fee_charges_transfer_idx ON fee_charges(transfer_id);
-
--- ============================================================
 -- FEE_CONFIGS (configuración de fees por asset)
 -- ============================================================
 CREATE TABLE fee_configs (
@@ -276,7 +256,25 @@ CREATE TABLE fee_configs (
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE UNIQUE INDEX fee_configs_asset_uq ON fee_configs(asset);
+-- ============================================================
+-- FEE_CHARGES (comisiones cobradas)
+-- ============================================================
+CREATE TABLE fee_charges (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    fee_config_id UUID REFERENCES fee_configs(id) ON DELETE SET NULL,
+    transfer_id UUID REFERENCES transfers(id) ON DELETE SET NULL,
+    ledger_entry_id UUID REFERENCES ledger_entries(id) ON DELETE SET NULL,
+    provider    TEXT NOT NULL,
+    leg_type    TEXT NOT NULL,
+    gross_amount NUMERIC(20,8) NOT NULL,
+    fee_amount   NUMERIC(20,8) NOT NULL,
+    fee_asset    TEXT NOT NULL,
+    fee_payer    TEXT NOT NULL,
+    status       TEXT NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX fee_charges_transfer_idx ON fee_charges(transfer_id);
 
 -- ============================================================
 -- Función de verificación de invariante del ledger (suma cero por grupo)
