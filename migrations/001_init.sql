@@ -250,6 +250,7 @@ CREATE TABLE fee_configs (
     flat_amount  NUMERIC(20,8),
     min_fee      NUMERIC(20,8),
     max_fee      NUMERIC(20,8),
+    tiers        JSONB DEFAULT '[]'::jsonb,
     asset_charged_in TEXT NOT NULL DEFAULT 'USDC',
     is_active    BOOLEAN NOT NULL DEFAULT true,
     valid_from   TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -280,21 +281,16 @@ CREATE INDEX fee_charges_transfer_idx ON fee_charges(transfer_id);
 -- ============================================================
 -- Función de verificación de invariante del ledger (suma cero por grupo)
 -- ============================================================
-CREATE OR REPLACE FUNCTION check_ledger_invariants() RETURNS INTEGER AS $$
-DECLARE
-    rec RECORD;
-    imbalance_count INTEGER := 0;
+-- Retorna filas vacías cuando todos los grupos están balanceados,
+-- o filas con los grupos desbalanceados cuando hay problemas.
+-- ============================================================
+CREATE OR REPLACE FUNCTION check_ledger_invariants() RETURNS TABLE(transaction_group_id UUID, asset TEXT) AS $$
 BEGIN
-    FOR rec IN
-        SELECT transaction_group_id, asset,
-               SUM(CASE WHEN direction = 'credit' THEN amount WHEN direction = 'debit' THEN -amount END) AS net_amount
+    RETURN QUERY
+        SELECT transaction_group_id, asset
         FROM ledger_entries
         GROUP BY transaction_group_id, asset
-        HAVING ABS(SUM(CASE WHEN direction = 'credit' THEN amount WHEN direction = 'debit' THEN -amount END)) > 0.00000001
-    LOOP
-        imbalance_count := imbalance_count + 1;
-    END LOOP;
-    RETURN imbalance_count;
+        HAVING ABS(SUM(CASE WHEN direction = 'credit' THEN amount WHEN direction = 'debit' THEN -amount END)) > 0.00000001;
 END;
 $$ LANGUAGE plpgsql;
 
