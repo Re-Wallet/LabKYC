@@ -189,23 +189,26 @@ CREATE INDEX transfers_status_idx    ON transfers(status);
 -- ============================================================
 CREATE TABLE claims (
     id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id                 UUID REFERENCES users(id) ON DELETE RESTRICT,
+    transfer_id             UUID NOT NULL REFERENCES transfers(id) ON DELETE CASCADE,
     claim_token_hash        TEXT NOT NULL,
     claim_token_plain       TEXT, -- solo en memoria, NO persistir en producción
-    amount                  NUMERIC(20,8) NOT NULL,
-    asset                   TEXT NOT NULL,
+    sponsor_account         TEXT NOT NULL,
+    claimant_account        TEXT NOT NULL,
     status                  claim_status NOT NULL DEFAULT 'pending',
     stellar_balance_id      TEXT,
     stellar_create_tx_hash  TEXT,
     stellar_claim_tx_hash   TEXT,
+    claimable_until         TIMESTAMPTZ,
     expires_at              TIMESTAMPTZ,
-    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-    claimed_at              TIMESTAMPTZ
+    claimed_by_user_id      UUID REFERENCES users(id) ON DELETE SET NULL,
+    claimed_at              TIMESTAMPTZ,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE UNIQUE INDEX claims_token_hash_uq ON claims(claim_token_hash);
-CREATE INDEX claims_user_idx   ON claims(user_id, created_at DESC);
+CREATE INDEX claims_user_idx   ON claims(claimed_by_user_id, created_at DESC);
 CREATE INDEX claims_status_idx ON claims(status);
+CREATE INDEX claims_transfer_idx ON claims(transfer_id);
 
 -- ============================================================
 -- LEDGER_ENTRIES (doble entrada contable, suma cero por grupo)
@@ -213,18 +216,22 @@ CREATE INDEX claims_status_idx ON claims(status);
 CREATE TABLE ledger_entries (
     id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     transaction_group_id    UUID NOT NULL,
-    cuenta_user_id          UUID REFERENCES users(id) ON DELETE SET NULL,
-    cuenta_wallet_id        UUID REFERENCES wallets(id) ON DELETE SET NULL,
-    cuenta_account_type     ledger_account_type NOT NULL,
+    user_id                 UUID REFERENCES users(id) ON DELETE SET NULL,
+    wallet_id               UUID REFERENCES wallets(id) ON DELETE SET NULL,
+    account_type            ledger_account_type NOT NULL,
     direction               ledger_direction NOT NULL,
     amount                  NUMERIC(20,8) NOT NULL,
     asset                   TEXT NOT NULL,
+    balance_after           NUMERIC(20,8) NOT NULL,
     entry_type              ledger_entry_type NOT NULL,
-    created_at              TIMESTAMPTZ NOT NULL DEFAULT now()
+    reference_transfer_id   UUID REFERENCES transfers(id) ON DELETE SET NULL,
+    reference_claim_id      UUID REFERENCES claims(id) ON DELETE SET NULL,
+    reference_external_id   TEXT,
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
 );
 
 CREATE INDEX ledger_entries_group_idx ON ledger_entries(transaction_group_id);
-CREATE INDEX ledger_entries_account_idx ON ledger_entries(cuenta_user_id, cuenta_wallet_id);
+CREATE INDEX ledger_entries_account_idx ON ledger_entries(user_id, wallet_id);
 CREATE INDEX ledger_entries_asset_idx ON ledger_entries(asset);
 
 -- ============================================================
@@ -232,10 +239,17 @@ CREATE INDEX ledger_entries_asset_idx ON ledger_entries(asset);
 -- ============================================================
 CREATE TABLE fee_charges (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    fee_config_id UUID REFERENCES fee_configs(id) ON DELETE SET NULL,
     transfer_id UUID REFERENCES transfers(id) ON DELETE SET NULL,
-    amount      NUMERIC(20,8) NOT NULL,
-    asset       TEXT NOT NULL,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+    ledger_entry_id UUID REFERENCES ledger_entries(id) ON DELETE SET NULL,
+    provider    TEXT NOT NULL,
+    leg_type    TEXT NOT NULL,
+    gross_amount NUMERIC(20,8) NOT NULL,
+    fee_amount   NUMERIC(20,8) NOT NULL,
+    fee_asset    TEXT NOT NULL,
+    fee_payer    TEXT NOT NULL,
+    status       TEXT NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX fee_charges_transfer_idx ON fee_charges(transfer_id);
@@ -245,12 +259,20 @@ CREATE INDEX fee_charges_transfer_idx ON fee_charges(transfer_id);
 -- ============================================================
 CREATE TABLE fee_configs (
     id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    asset        TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    operation_type TEXT NOT NULL,
+    fiat_currency TEXT,
+    crypto_asset TEXT,
+    provider     TEXT,
     fee_type     fee_type_enum NOT NULL,
-    fee_value    NUMERIC(20,8) NOT NULL,
-    min_amount   NUMERIC(20,8),
-    max_amount   NUMERIC(20,8),
+    percentage   NUMERIC(20,8),
+    flat_amount  NUMERIC(20,8),
+    min_fee      NUMERIC(20,8),
+    max_fee      NUMERIC(20,8),
+    asset_charged_in TEXT NOT NULL DEFAULT 'USDC',
     is_active    BOOLEAN NOT NULL DEFAULT true,
+    valid_from   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    valid_until  TIMESTAMPTZ,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
